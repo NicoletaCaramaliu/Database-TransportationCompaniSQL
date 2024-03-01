@@ -1,0 +1,214 @@
+---EXERCITII
+
+---12 1 Sa se afiseze codul rutei, numele concatenat cu prenumele, codul si varsta la care s au angajat soferii ce conduc autobuzele care circula pe rutele pe care au fost cumparate cele mai multe bilete.
+
+---• subcerere nesincronizată în clauza FROM + o functie pe șiruri de caractere initcap + o functie pe date calendaristice months_between
+
+SELECT ruta.cod, concat(initcap(s.nume),' '||initcap(s.prenume)) Nume, s.cod_sofer Cod, floor(months_between(s.data_angajarii,s.data_nasterii)/12) "Varsta angajare"
+FROM autobuze a, (SELECT cod_ruta cod
+                    FROM bilete
+                    GROUP BY cod_ruta
+                    HAVING COUNT(cod_ruta) =(SELECT MAX(count(cod_ruta))
+                    FROM bilete
+                    GROUP BY cod_ruta)) ruta, soferi s, programe_autobuze p                                                         
+where a.cod_ruta in ruta.cod
+and a.nr_inmatriculare=p.cod_autobuz
+and s.cod_sofer=p.cod_sofer;           
+
+---2.Sa se afiseze suma varstelor pentru soferii care conduc autobuze ce opresc in cele mai multe statii, soferii fiind grupati dupa varste.
+
+---• grupări de date cu subcereri nesincronizate in care intervin cel putin 3 tabele, funcții grup, filtrare la nivel de grupuri (in cadrul aceleiasi cereri)
+---• utilizarea a cel puțin 1 bloc de cerere (clauza WITH)
+---+o funcție pe date calendaristice –sysdate
+
+
+with statii_max as (select cod_ruta cod
+                    from statii_rute 
+                    group by cod_ruta
+                    having count(cod_statie)=(select max(count(cod_statie))
+                                              from statii_rute
+                                              group by cod_ruta))   ---codul rutelor cu cele mai multe statii
+select sum(floor(months_between(sysdate,s.data_nasterii)/12)) "Suma varste"
+from soferi s, statii_max
+where s.cod_sofer in (select cod_sofer 
+                        from programe_autobuze
+                        where cod_autobuz in (select nr_inmatriculare
+                                                from autobuze
+                                                where cod_ruta in (select cod from statii_max)))
+group by floor(months_between(sysdate,s.data_nasterii)/12);
+
+
+
+
+---select p.nume, p.prenume, b.cod_bilet, b.pret, b.pret*100/(100-nvl((select valoare from reduceri r where ---r.cod_reducere=b.cod_reducere),0))
+---from bilete b, pasageri p
+---where p.cod_pasager=b.cod_pasager;
+
+
+
+----3 CASE
+---Pentru soferii angajati înainte de 2014 sa se aplice o marire de 25% a salariului, pentru cei angajati în 2014-2019 sa se aplice o marire de 20%, 
+----iar pentru cei angajati intre 2020-2021 o marire de 15%, restul raman cu acelasi salariu. Pentru fiecare sofer sa se afisseze numele si prenumele concatenate scrise cu litere mari, orasul 
+----în care locuiesc, data angajarii, salariul înainte de marire, salariul dupa marire. Pentru cei ce nu au salariul setat se va afisa 0. Soferii vor fi ordonati
+---descrescator dupa salariu, iar în caz de egalitate crescator dupa nume.
+
+---	utilizarea a cel putin 2 functii pe siruri de caractere, 2 functii pe date calendaristice, a cel putin unei expresii CASE.
+---am folosit o functie pe siruri de caractere-UPPER, o functie pe date calendaristice EXTRACT si o expresie CASE
+
+
+select upper(s.nume)||' ' ||upper(s.prenume) Nume, o.nume_oras Oras, s.data_angajarii "Data angajarii", nvl(s.salariu,0) "Salariu inainte de marire", CASE
+               WHEN extract(year from data_angajarii)<2014 THEN NVL(s.salariu, 0)*1.25
+               WHEN extract(year from data_angajarii) between 2014 and 2019 THEN NVL(s.salariu, 0)*1.2
+               WHEN extract(year from data_angajarii) between 2020 and 2021 THEN NVL(s.salariu, 0)*1.15
+               ELSE NVL(s.salariu, 0)
+               END as "Salariu marit"
+from soferi s, adrese a, orase o
+where s.cod_adresa=a.cod_adresa
+and a.cod_oras=o.cod_oras
+order by nvl(s.salariu,0) desc, s.nume asc; 
+
+
+---4 
+---Pentru fiecare bilet achizitionat sa se afiseze numele+prenumele celui ce l-a cumparat, codul biletului, codul rutei pentru care a fost cumparat, pretul biletului 
+---cu care a fost achizitionat(cu reducerea aplicata pentru cele care beneficiaza), codul de reducere aplicat(se afiseaza si cele care nu beneficiaza de reducere), pretul întreg al biletului. 
+---Pentru cei care nu beneficiaza de reducere în locul pretului întreg se va afisa mesajul “Nu beneficiaza de reducere”.
+
+----ordonari si utilizarea functiilor NVL si DECODE (in cadrul aceleiasi cereri)
+
+
+SELECT p.nume||' '||p.prenume Nume,  b.cod_bilet "Cod bilet",   b.cod_ruta Ruta,   b.pret "Pret achizitie",   nvl(r.cod_reducere,'fara reducere') "Cod reducere",  
+DECODE((SELECT valoare FROM reduceri r WHERE r.cod_reducere = b.cod_reducere), NULL, 'Nu beneficiaza de reducere', b.pret*100/(100 - (SELECT valoare FROM reduceri r WHERE r.cod_reducere = b.cod_reducere))) AS "Pret intreg"
+FROM bilete b, reduceri r, pasageri p
+where r.cod_reducere(+)=b.cod_reducere
+and p.cod_pasager=b.cod_pasager
+order by pret, p.nume;
+
+
+
+---5.Sa se afiseze anul fabricatiei, numarul de înmatriculare al autobuzelor si numele defectiunilor pe care le-au reparat mecanicii cu 
+----cele mai multe reparatii efectuate. Afisati si codul mecanicilor respectivi. 
+
+----subcereri sincronizate în care intervin cel putin 3 tabele
+
+select a.an_fabricatie,a.nr_inmatriculare, d.nume_defectiune, m.cod_mecanic
+from autobuze a, defectiuni d, mecanici m
+where a.nr_inmatriculare in (select r.cod_autobuz
+                            from istoric_reparatii r
+                            where r.cod_mecanic=m.cod_mecanic
+                            and r.cod_defectiune=d.cod_defectiune
+                            and m.cod_mecanic in (select cod_mecanic
+                                                from istoric_reparatii
+                                                group by cod_mecanic
+                                                having count(cod_mecanic) in (select max(count(cod_mecanic)) 
+                                                                            from istoric_reparatii 
+                                                                            group by cod_mecanic)));
+                                                                            
+                                                                            
+---modificat
+select a.an_fabricatie,me.cod_mecanic
+from autobuze a,mecanici me, defectiuni de
+where a.nr_inmatriculare in (select r.cod_autobuz
+                            from istoric_reparatii r
+                            where a.nr_inmatriculare=r.cod_autobuz
+                            and r.cod_mecanic=(select cod_mecanic
+                                                from istoric_reparatii
+                                                group by cod_mecanic
+                                                having count(cod_mecanic) in (select max(count(cod_mecanic)) 
+                                                                            from istoric_reparatii 
+                                                                            group by cod_mecanic))
+                            and r.cod_defectiune=de.cod_defectiune
+                            and r.cod_mecanic=me.cod_mecanic);
+
+
+---13.   Îi setam mecanicului cu numele Popa care are prenumele null-prenumele Marian. –UPDATE
+
+
+UPDATE MECANICI
+SET prenume='Marian'
+where cod_mecanic=(select cod_mecanic
+                    from mecanici
+                    where upper(nume)='POPA' 
+                    and prenume is null);
+   
+---Stergem soferii care nu se afla pe niciun traseu si nu au salariul setat -- concediati        
+    
+DELETE from SOFERI
+where cod_sofer in(             
+select cod_sofer
+from soferi
+minus
+select distinct cod_sofer
+from programe_autobuze)
+and salariu is null;
+
+---Soferilor care stau in orasul Mioveni le adaugam 100 de lei la salariu
+
+UPDATE SOFERI
+SET salariu=salariu+100
+where cod_sofer in(
+select cod_sofer
+from soferi
+where cod_adresa in (select cod_Adresa
+                from adrese
+                where cod_oras=(select cod_oras
+                                from orase
+                                where lower(nume_oras)='mioveni')));
+                                
+select * from soferi;
+
+
+---15. Formulati în limbaj natural si implementa?i în SQL: o cerere ce utilizeaza operatia outer-join pe minimum 4 tabele, o cerere ce utilizeaza operatia division si o cerere care 
+---implementeaza analiza top-n.
+
+---Top 5 ani de fabricatie a autobuzelor din firma si autobuzele care sunt fabricate in acei ani.
+
+
+with ani5 as ( select * 
+                  from (select distinct an_fabricatie
+                          from autobuze 
+                          order by an_fabricatie desc) 
+                  where rownum<=5)
+select nr_inmatriculare, an_Fabricatie
+from autobuze
+where an_fabricatie in (select an_fabricatie from ani5)
+order by an_fabricatie desc; 
+
+
+---outer join pe minim 4 tabele
+
+
+
+---Sa se afiseze pentru fiecare autobuz numarul de înmatriculare, zilele în care circula pentru cele care sunt pe traseu, iar pentru cele care sunt în service sa se afiseze numarul reparatiei si denumirea defectiunii. 
+
+
+select p.ziua, a.nr_inmatriculare, i.nr_reparatie, d.nume_defectiune
+from programe_autobuze p, autobuze a, istoric_reparatii i, defectiuni d
+where p.cod_autobuz(+)=a.nr_inmatriculare
+and a.nr_inmatriculare=i.cod_autobuz(+)
+and i.cod_defectiune=d.cod_defectiune(+);
+
+
+---division
+---inserez reparatii astfel incat sa existe mecanici care au reparat toate autobuzele 
+select * from istoric_reparatii;
+---insert into istoric_reparatii values (11, to_date('12-06-2021','DD-MM-YYYY'),'B-304-ABA',500,601);---le am pus in creare inserare
+---insert into istoric_reparatii values (12, to_date('10-06-2021','DD-MM-YYYY'),'B-139-CCC',500,600);
+---insert into istoric_reparatii values (13, to_date('12-08-2020','DD-MM-YYYY'),'B-336-CCC',500,606);
+
+select nr_inmatriculare 
+from autobuze
+where cod_ruta is null;
+
+SELECT m.cod_mecanic, m.nume, m.prenume
+FROM Mecanici m
+WHERE NOT EXISTS (
+    SELECT *
+    FROM Autobuze a
+    WHERE a.cod_ruta is null
+    AND NOT EXISTS (
+        SELECT *
+        FROM Istoric_Reparatii ir
+        WHERE ir.cod_mecanic = m.cod_mecanic
+        AND ir.cod_autobuz = a.nr_inmatriculare
+    )
+);
